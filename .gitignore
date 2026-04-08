@@ -1,0 +1,9 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.streamlit/secrets.toml
+.local/
+tracked_config/opencode.secrets.json
+*.egg-info/
+.DS_Store
