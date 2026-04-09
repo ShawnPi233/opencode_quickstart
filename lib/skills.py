@@ -8,7 +8,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from lib.paths import repo_root
+from lib.paths import preferred_global_config_home, repo_root
 
 SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -40,18 +40,19 @@ class SkillRecord:
 
 def available_skill_scopes() -> list[SkillScope]:
     root = repo_root()
+    config_home = preferred_global_config_home()
     home = Path.home()
     return [
-        SkillScope("project-opencode", "项目 .opencode", root / ".opencode" / "skills"),
-        SkillScope("project-claude", "项目 .claude", root / ".claude" / "skills"),
-        SkillScope("project-agents", "项目 .agents", root / ".agents" / "skills"),
         SkillScope(
             "global-opencode",
-            "全局 ~/.config/opencode",
-            home / ".config" / "opencode" / "skills",
+            "全局 opencode 配置",
+            config_home / "opencode" / "skills",
         ),
         SkillScope("global-claude", "全局 ~/.claude", home / ".claude" / "skills"),
         SkillScope("global-agents", "全局 ~/.agents", home / ".agents" / "skills"),
+        SkillScope("project-opencode", "项目 .opencode", root / ".opencode" / "skills"),
+        SkillScope("project-claude", "项目 .claude", root / ".claude" / "skills"),
+        SkillScope("project-agents", "项目 .agents", root / ".agents" / "skills"),
     ]
 
 

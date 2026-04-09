@@ -550,6 +550,8 @@ def render_skills() -> None:
     )
 
     scope_map, scope_labels = _skill_scope_options()
+    if "skills_scope_select" not in st.session_state and scope_labels:
+        st.session_state["skills_scope_select"] = scope_labels[0]
     selected_label = st.selectbox(
         "Skill 目录",
         options=scope_labels,

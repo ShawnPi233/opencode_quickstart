@@ -104,6 +104,83 @@ cd /user/baibingsong/opencode_quickstart
 bash start.sh ui
 ```
 
+看板包含以下主要功能：
+
+- `快速开始`：一键安装 OpenCode、写入 `env_init.sh`、合并生成运行时 `opencode.json`
+- `分步部署`：单独安装 CLI、单独写入运行配置、界面内做基础自检
+- `配置与密钥`：编辑 `tracked_config/opencode.public.json` 和本机 `tracked_config/opencode.secrets.json`
+- `Git / 导入`：设置 Git 身份、检查 GitHub SSH、提交/推送、从现有 `opencode.json` 导入配置
+- `Skills`：按 OpenCode 官方目录结构管理 skill，支持增删改查
+
+### 看板中的 Skills 管理
+
+`Skills` 标签页现在支持：
+
+- 选择 skill 作用域目录
+  - 项目级：`.opencode/skills`、`.claude/skills`、`.agents/skills`
+  - 全局级：`$XDG_CONFIG_HOME/opencode/skills`、`~/.claude/skills`、`~/.agents/skills`
+- 新建 skill
+- 编辑已有 skill
+- 改名时同步调整 skill 目录名
+- 删除整个 skill 目录
+- 预览最终生成的 `SKILL.md`
+
+在这个 quickstart 环境里，`env_init.sh` 会设置：
+
+```bash
+export XDG_CONFIG_HOME="$OPENCODE_ROOT/config"
+```
+
+因此默认的全局 OpenCode skill 目录实际是：
+
+```text
+<OPENCODE_ROOT>/config/opencode/skills
+```
+
+例如当 `OPENCODE_ROOT=/user/<用户名>/opencode` 时，对应目录就是：
+
+```text
+/user/<用户名>/opencode/config/opencode/skills
+```
+
+生成的 skill 文件结构符合 OpenCode 官方约定：
+
+```text
+<scope>/skills/<name>/SKILL.md
+```
+
+其中 `SKILL.md` 会自动写入标准 frontmatter，包含：
+
+- `name`
+- `description`
+- `license`（可选）
+- `compatibility`（可选）
+- `metadata`（可选）
+
+### Skill 怎么被调用
+
+看板负责的是 `SKILL.md` 文件管理，不是在看板里直接执行 skill。
+
+当 skill 被保存到 OpenCode 可发现的目录后，OpenCode 在 CLI / Agent 运行时会自动发现这些 skill，并在需要时通过 `skill` 工具加载。
+
+例如：
+
+```text
+skill({ name: "your-skill-name" })
+```
+
+实际使用时，通常不需要你手写这句调用。更常见的方式是直接在 OpenCode 对话里明确说明：
+
+- `请使用 xxx 这个 skill 处理这个任务`
+- `先加载 xxx skill，再继续`
+
+前提是：
+
+- skill 名称合法，且与目录名一致
+- `SKILL.md` frontmatter 完整
+- skill 所在目录在 OpenCode 的发现范围内
+- 权限配置没有把该 skill 隐藏或禁用
+
 ## 常用环境变量
 
 | 变量 | 说明 |

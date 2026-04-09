@@ -63,7 +63,9 @@ def save_ui_settings(data: dict[str, Any]) -> None:
     path = ui_settings_path()
     merged = load_ui_settings()
     merged.update(data)
-    path.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def resolve_opencode_root(*, sidebar_input: str | None = None) -> Path:
@@ -91,6 +93,29 @@ def resolve_opencode_root(*, sidebar_input: str | None = None) -> Path:
         return p
 
     return default_opencode_root()
+
+
+def preferred_global_config_home() -> Path:
+    """
+    Prefer XDG_CONFIG_HOME semantics used by this project.
+
+    `env_init.sh` exports:
+    - `XDG_CONFIG_HOME=$OPENCODE_ROOT/config`
+
+    OpenCode global config should therefore live under:
+    - `$XDG_CONFIG_HOME/opencode/...`
+
+    When env vars are unavailable, derive the same location from `OPENCODE_ROOT`.
+    Fallback to `Path.home() / ".config"`.
+    """
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if xdg:
+        return Path(xdg).expanduser().resolve()
+
+    root = resolve_opencode_root()
+    if root.name == "opencode":
+        return (root / "config").resolve()
+    return (Path.home() / ".config").resolve()
 
 
 def target_opencode_json(root: Path) -> Path:
