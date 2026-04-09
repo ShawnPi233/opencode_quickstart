@@ -43,6 +43,14 @@ def git_push() -> tuple[int, str, str]:
     return run_cmd(git_argv("push"), cwd=None, timeout=300)
 
 
+def git_current_branch() -> tuple[int, str, str]:
+    return run_cmd(git_argv("branch", "--show-current"), cwd=None, timeout=30)
+
+
+def git_push_set_upstream_origin(branch: str) -> tuple[int, str, str]:
+    return run_cmd(git_argv("push", "--set-upstream", "origin", branch), cwd=None, timeout=300)
+
+
 def git_remote_verbose() -> tuple[int, str, str]:
     return run_cmd(git_argv("remote", "-v"), cwd=None, timeout=30)
 

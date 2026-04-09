@@ -12,11 +12,13 @@ from lib.env_init import opencode_subprocess_env, write_env_init
 from lib.git_ops import (
     git_add_all,
     git_commit,
+    git_current_branch,
     git_diff_stat,
     git_get_config,
     git_is_repository,
     git_pull,
     git_push,
+    git_push_set_upstream_origin,
     git_remote_verbose,
     git_set_config,
     git_status,
@@ -421,6 +423,20 @@ def render_git_and_import(root: Path) -> None:
                 st.code(s_out + s_err, language="text")
                 if s_code != 0:
                     st.error("push 失败")
+            if st.button("首次推送：设置 upstream 并 push", key="git_ps_upstream"):
+                b_code, b_out, b_err = git_current_branch()
+                branch = (b_out or "").strip()
+                if b_code != 0 or not branch:
+                    st.error("无法识别当前分支")
+                    st.code(b_out + b_err, language="text")
+                else:
+                    with st.spinner(f"push --set-upstream origin {branch} …"):
+                        u_code, u_out, u_err = git_push_set_upstream_origin(branch)
+                    st.code(u_out + u_err, language="text")
+                    if u_code == 0:
+                        st.success(f"已设置 upstream：origin/{branch}")
+                    else:
+                        st.error("设置 upstream 失败")
 
         st.divider()
         st.caption("仅提交并 push `tracked_config/opencode.public.json`（与侧栏「自动同步」相同逻辑）")
