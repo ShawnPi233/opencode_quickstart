@@ -45,6 +45,16 @@ from lib.merge_config import (
 from lib.one_click import run_one_click_setup
 from lib.paths import public_config_path, repo_root, secrets_config_path
 from lib.run_cmd import run_cmd
+from lib.skills import (
+    SkillContent,
+    available_skill_scopes,
+    delete_skill,
+    list_skills,
+    load_skill,
+    render_skill_markdown,
+    save_skill,
+    validate_skill_name,
+)
 
 
 def render_quickstart(root: Path) -> None:
@@ -499,6 +509,205 @@ def render_config(root: Path) -> None:
                     st.rerun()
                 except Exception as e:
                     st.error(str(e))
+
+
+def _skill_scope_options() -> tuple[dict[str, object], list[str]]:
+    scopes = available_skill_scopes()
+    mapping = {scope.label: scope for scope in scopes}
+    return mapping, [scope.label for scope in scopes]
+
+
+def _load_skill_form(scope_key: str, *, record=None) -> None:
+    prefix = f"skill_form_{scope_key}_"
+    if record is None or record.content is None:
+        st.session_state[f"{prefix}original_name"] = ""
+        st.session_state[f"{prefix}name"] = ""
+        st.session_state[f"{prefix}description"] = ""
+        st.session_state[f"{prefix}license"] = ""
+        st.session_state[f"{prefix}compatibility"] = "opencode"
+        st.session_state[f"{prefix}metadata"] = "{}"
+        st.session_state[f"{prefix}body"] = (
+            "## What I do\n- \n\n## When to use me\n- \n"
+        )
+        return
+
+    content = record.content
+    st.session_state[f"{prefix}original_name"] = record.folder_name
+    st.session_state[f"{prefix}name"] = content.name
+    st.session_state[f"{prefix}description"] = content.description
+    st.session_state[f"{prefix}license"] = content.license
+    st.session_state[f"{prefix}compatibility"] = content.compatibility or "opencode"
+    st.session_state[f"{prefix}metadata"] = json.dumps(
+        content.metadata or {}, indent=2, ensure_ascii=False
+    )
+    st.session_state[f"{prefix}body"] = content.body
+
+
+def render_skills() -> None:
+    st.subheader("Skill 管理")
+    st.caption(
+        "按 OpenCode 官方约定管理 `SKILL.md`。支持项目级与全局目录，变更后无需写入 opencode.json。"
+    )
+
+    scope_map, scope_labels = _skill_scope_options()
+    selected_label = st.selectbox(
+        "Skill 目录",
+        options=scope_labels,
+        key="skills_scope_select",
+        help="支持 .opencode / .claude / .agents 的项目级和全局级 skills 目录。",
+    )
+    scope = scope_map[selected_label]
+    scope_key = scope.key
+    scope_dir = scope.directory
+
+    records = list_skills(scope_dir)
+    record_map = {record.folder_name: record for record in records}
+
+    st.caption(f"当前目录：`{scope_dir}`")
+    st.caption(f"当前共发现 `{len(records)}` 个 skill。")
+
+    options = ["__new__"] + [record.folder_name for record in records]
+    selected_key = f"skills_selected_{scope_key}"
+    pending_selected_key = f"skills_selected_pending_{scope_key}"
+    pending_selected = st.session_state.pop(pending_selected_key, None)
+    if pending_selected in options:
+        st.session_state[selected_key] = pending_selected
+    elif st.session_state.get(selected_key) not in options:
+        st.session_state[selected_key] = "__new__"
+
+    selected_folder = st.selectbox(
+        "选择 skill",
+        options=options,
+        key=selected_key,
+        format_func=lambda value: "新建 skill" if value == "__new__" else value,
+    )
+
+    loaded_key = f"skills_loaded_{scope_key}"
+    if st.session_state.get(loaded_key) != selected_folder:
+        if selected_folder == "__new__":
+            _load_skill_form(scope_key)
+        else:
+            _load_skill_form(scope_key, record=record_map[selected_folder])
+        st.session_state[loaded_key] = selected_folder
+        st.session_state.pop(f"skills_preview_content_{scope_key}", None)
+
+    prefix = f"skill_form_{scope_key}_"
+    st.markdown("#### 已有 skills")
+    if not records:
+        st.info("当前目录还没有 skill。")
+    else:
+        rows = []
+        for record in records:
+            rows.append(
+                {
+                    "name": record.folder_name,
+                    "description": record.content.description
+                    if record.content
+                    else "解析失败",
+                    "status": "正常" if record.content else f"错误: {record.error}",
+                }
+            )
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    if selected_folder != "__new__":
+        current_record = record_map[selected_folder]
+        st.caption(f"当前文件：`{current_record.file_path}`")
+        if current_record.error:
+            st.warning(current_record.error)
+
+    st.markdown("#### 编辑")
+    meta_col1, meta_col2 = st.columns(2)
+    with meta_col1:
+        st.text_input(
+            "name",
+            key=f"{prefix}name",
+            help="目录名和 frontmatter 中的 name 必须一致，只能用小写字母、数字和连字符。",
+        )
+        st.text_input("description", key=f"{prefix}description")
+        st.text_input("license", key=f"{prefix}license")
+    with meta_col2:
+        st.text_input(
+            "compatibility",
+            key=f"{prefix}compatibility",
+            help="可留空，常见值是 `opencode`。",
+        )
+        st.text_area(
+            "metadata(JSON object)",
+            key=f"{prefix}metadata",
+            height=128,
+            help='例如 {"audience": "team", "workflow": "review"}',
+        )
+    st.text_area("正文", key=f"{prefix}body", height=280)
+
+    def _build_skill_content() -> SkillContent:
+        metadata_raw = st.session_state[f"{prefix}metadata"].strip() or "{}"
+        metadata = parse_json_object(metadata_raw)
+        normalized_metadata = {
+            str(k).strip(): str(v).strip()
+            for k, v in metadata.items()
+            if str(k).strip() and str(v).strip()
+        }
+        content = SkillContent(
+            name=validate_skill_name(st.session_state[f"{prefix}name"]),
+            description=st.session_state[f"{prefix}description"].strip(),
+            license=st.session_state[f"{prefix}license"].strip(),
+            compatibility=st.session_state[f"{prefix}compatibility"].strip(),
+            metadata=normalized_metadata,
+            body=st.session_state[f"{prefix}body"].rstrip() + "\n",
+        )
+        if not content.description:
+            raise ValueError("description 不能为空")
+        return content
+
+    save_col, preview_col, delete_col = st.columns(3)
+    with save_col:
+        if st.button("保存 skill", type="primary", key=f"skills_save_{scope_key}"):
+            try:
+                content = _build_skill_content()
+                original_name = st.session_state.get(f"{prefix}original_name") or None
+                save_skill(scope_dir, content, original_name=original_name)
+                st.session_state[pending_selected_key] = content.name
+                st.session_state[loaded_key] = None
+                st.session_state[f"skills_preview_content_{scope_key}"] = (
+                    render_skill_markdown(content)
+                )
+                st.success(f"已保存 `{content.name}`")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    with preview_col:
+        if st.button("预览 SKILL.md", key=f"skills_preview_{scope_key}"):
+            try:
+                content = _build_skill_content()
+                st.session_state[f"skills_preview_content_{scope_key}"] = (
+                    render_skill_markdown(content)
+                )
+            except Exception as exc:
+                st.error(str(exc))
+    with delete_col:
+        confirm_key = f"skills_delete_confirm_{scope_key}"
+        if selected_folder != "__new__":
+            st.checkbox("确认删除目录", value=False, key=confirm_key)
+            if st.button("删除 skill", key=f"skills_delete_{scope_key}"):
+                if not st.session_state.get(confirm_key, False):
+                    st.warning("请先勾选“确认删除目录”")
+                else:
+                    try:
+                        delete_skill(scope_dir, selected_folder)
+                        st.session_state[pending_selected_key] = "__new__"
+                        st.session_state[loaded_key] = None
+                        st.session_state.pop(
+                            f"skills_preview_content_{scope_key}", None
+                        )
+                        st.success(f"已删除 `{selected_folder}`")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+
+    preview_text = st.session_state.get(f"skills_preview_content_{scope_key}")
+    if preview_text:
+        with st.expander("预览 SKILL.md", expanded=True):
+            st.code(preview_text, language="markdown")
 
 
 def render_git_and_import(root: Path) -> None:
