@@ -13,10 +13,12 @@ from lib.git_ops import (
     git_add_all,
     git_commit,
     git_diff_stat,
+    git_get_config,
     git_is_repository,
     git_pull,
     git_push,
     git_remote_verbose,
+    git_set_config,
     git_status,
     git_sync_public_json_to_remote,
 )
@@ -314,6 +316,69 @@ def render_git_and_import(root: Path) -> None:
         if rc == 0 and (rv_out or rv_err).strip():
             st.caption("当前 remote（请确认指向你的私有库）")
             st.code((rv_out + rv_err).strip(), language="text")
+
+        st.markdown("#### Git 身份（user.name / user.email）")
+        c_name_local, o_name_local, _ = git_get_config("user.name", global_scope=False)
+        c_mail_local, o_mail_local, _ = git_get_config("user.email", global_scope=False)
+        c_name_global, o_name_global, _ = git_get_config("user.name", global_scope=True)
+        c_mail_global, o_mail_global, _ = git_get_config("user.email", global_scope=True)
+
+        local_name = (o_name_local or "").strip() if c_name_local == 0 else ""
+        local_email = (o_mail_local or "").strip() if c_mail_local == 0 else ""
+        global_name = (o_name_global or "").strip() if c_name_global == 0 else ""
+        global_email = (o_mail_global or "").strip() if c_mail_global == 0 else ""
+
+        effective_name = local_name or global_name
+        effective_email = local_email or global_email
+        if effective_name and effective_email:
+            st.caption(f"当前生效身份：{effective_name} <{effective_email}>")
+        else:
+            st.warning("当前未检测到完整 Git 身份，提交会失败。请先设置 user.name 和 user.email。")
+
+        st.caption(
+            f"仓库级：name={local_name or '(未设置)'} / email={local_email or '(未设置)'}；"
+            f"全局：name={global_name or '(未设置)'} / email={global_email or '(未设置)'}"
+        )
+
+        id_name = st.text_input(
+            "Git 用户名（user.name）",
+            value=effective_name,
+            key="dash_git_user_name",
+            placeholder="Your Name",
+        )
+        id_email = st.text_input(
+            "Git 邮箱（user.email）",
+            value=effective_email,
+            key="dash_git_user_email",
+            placeholder="you@example.com",
+        )
+        i1, i2 = st.columns(2)
+        with i1:
+            if st.button("设置当前仓库身份", key="git_set_identity_local"):
+                if not id_name.strip() or not id_email.strip():
+                    st.warning("请同时填写 user.name 和 user.email")
+                else:
+                    n_code, n_out, n_err = git_set_config("user.name", id_name.strip(), global_scope=False)
+                    e_code, e_out, e_err = git_set_config("user.email", id_email.strip(), global_scope=False)
+                    st.code(n_out + n_err + e_out + e_err, language="text")
+                    if n_code == 0 and e_code == 0:
+                        st.success("已写入当前仓库 Git 身份")
+                        st.rerun()
+                    else:
+                        st.error("设置失败，请检查上方日志")
+        with i2:
+            if st.button("设置全局身份（--global）", key="git_set_identity_global"):
+                if not id_name.strip() or not id_email.strip():
+                    st.warning("请同时填写 user.name 和 user.email")
+                else:
+                    n_code, n_out, n_err = git_set_config("user.name", id_name.strip(), global_scope=True)
+                    e_code, e_out, e_err = git_set_config("user.email", id_email.strip(), global_scope=True)
+                    st.code(n_out + n_err + e_out + e_err, language="text")
+                    if n_code == 0 and e_code == 0:
+                        st.success("已写入全局 Git 身份")
+                        st.rerun()
+                    else:
+                        st.error("设置失败，请检查上方日志")
 
         if st.button("刷新状态", key="git_refresh"):
             st.rerun()

@@ -47,6 +47,22 @@ def git_remote_verbose() -> tuple[int, str, str]:
     return run_cmd(git_argv("remote", "-v"), cwd=None, timeout=30)
 
 
+def git_get_config(key: str, *, global_scope: bool = False) -> tuple[int, str, str]:
+    argv = ["config"]
+    if global_scope:
+        argv.append("--global")
+    argv.extend(["--get", key])
+    return run_cmd(git_argv(*argv), cwd=None, timeout=30)
+
+
+def git_set_config(key: str, value: str, *, global_scope: bool = False) -> tuple[int, str, str]:
+    argv = ["config"]
+    if global_scope:
+        argv.append("--global")
+    argv.extend([key, value])
+    return run_cmd(git_argv(*argv), cwd=None, timeout=30)
+
+
 def git_sync_public_json_to_remote(
     commit_message: str = "chore: sync opencode.public.json",
 ) -> tuple[bool, str]:

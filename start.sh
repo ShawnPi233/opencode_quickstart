@@ -140,6 +140,35 @@ _uv_path_prepend() {
   export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
 }
 
+_install_uv_with_fallback() {
+  local install_ok=0
+
+  if command -v curl >/dev/null 2>&1; then
+    if curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 15 -fsSL https://astral.sh/uv/install.sh | sh; then
+      install_ok=1
+    fi
+  fi
+
+  if [[ "$install_ok" -eq 0 ]]; then
+    _log "通过官方脚本安装 uv 失败，尝试使用 pip --user 安装..."
+    local pip_args=(-m pip install --user -U uv)
+    if [[ -n "${OPENCODE_PIP_INDEX:-}" ]]; then
+      pip_args+=(-i "${OPENCODE_PIP_INDEX}")
+    elif [[ -n "${PIP_INDEX_URL:-}" ]]; then
+      pip_args+=(-i "${PIP_INDEX_URL}")
+    fi
+
+    if "$PYTHON_CMD" "${pip_args[@]}"; then
+      install_ok=1
+    fi
+  fi
+
+  if [[ "$install_ok" -eq 1 ]]; then
+    return 0
+  fi
+  return 1
+}
+
 _print_progress 5 "检查运行环境"
 
 PYTHON_CMD="$(_find_python_cmd)" || _die "未找到 python3/python，请先安装 Python 3。"
@@ -149,7 +178,7 @@ _ensure_ui_runtime() {
 
   if ! command -v uv >/dev/null 2>&1; then
     _log "正在安装 uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    _install_uv_with_fallback
     _uv_path_prepend
   fi
 
