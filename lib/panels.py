@@ -71,12 +71,21 @@ def render_quickstart(root: Path) -> None:
         key="quick_api_key",
         help="写入 tracked_config/opencode.secrets.json，已 .gitignore",
     )
-    force_npm = st.checkbox("强制重新 npm 安装（已有 opencode 时勾选）", value=False, key="quick_force_npm")
+    force_npm = st.checkbox(
+        "强制重新 npm 安装（已有 opencode 时勾选）", value=False, key="quick_force_npm"
+    )
 
     if st.button("一键安装并应用配置", type="primary", key="one_click_btn"):
         with st.spinner("正在执行（npm 可能较慢）…"):
-            ok, lines = run_one_click_setup(root, api_key=api_key or "", force_npm=force_npm)
-        st.text_area("执行记录", value="\n\n".join(lines), height=min(400, 120 + 20 * len(lines)), disabled=True)
+            ok, lines = run_one_click_setup(
+                root, api_key=api_key or "", force_npm=force_npm
+            )
+        st.text_area(
+            "执行记录",
+            value="\n\n".join(lines),
+            height=min(400, 120 + 20 * len(lines)),
+            disabled=True,
+        )
         if ok:
             st.success("一键步骤已完成。")
             _maybe_auto_sync_public()
@@ -92,12 +101,16 @@ def render_quickstart(root: Path) -> None:
                     st.caption("界面内自检 `opencode --version`：")
                     st.code((o + e).strip(), language="text")
         else:
-            st.error("未完成，请根据上方日志排查（常见：未装 Node/npm、网络、缺少 public.json）。")
+            st.error(
+                "未完成，请根据上方日志排查（常见：未装 Node/npm、网络、缺少 public.json）。"
+            )
 
     st.divider()
     st.markdown("#### 结束：在终端执行（每开一个终端做一次）")
     st.code(f'source "{root_res / "env_init.sh"}"', language="bash")
-    st.caption("一键按钮会生成/更新其中的 `env_init.sh`。换机后若挂载路径不变，仍用同一行即可沿用配置与历史。")
+    st.caption(
+        "一键按钮会生成/更新其中的 `env_init.sh`。换机后若挂载路径不变，仍用同一行即可沿用配置与历史。"
+    )
 
 
 def _maybe_auto_sync_public() -> None:
@@ -110,6 +123,179 @@ def _maybe_auto_sync_public() -> None:
         st.warning(f"自动同步失败：{msg}")
 
 
+def _ssh_auth_ok(output: str) -> bool:
+    return "successfully authenticated" in output.lower()
+
+
+def _run_github_ssh_quick_setup(
+    key_comment: str, key_title: str
+) -> tuple[bool, str, str | None]:
+    logs: list[str] = []
+
+    gh_code, gh_out, gh_err = gh_cli_version()
+    logs.append("$ gh --version\n" + (gh_out + gh_err).strip())
+    if gh_code != 0:
+        i_code, i_out, i_err = install_gh_cli()
+        logs.append("$ install gh\n" + (i_out + i_err).strip())
+        if i_code != 0:
+            return (
+                False,
+                "\n\n".join(part for part in logs if part.strip()),
+                "自动安装 gh 失败，请手动安装后重试。",
+            )
+
+    auth_code, auth_out, auth_err = gh_auth_status()
+    logs.append("$ gh auth status\n" + (auth_out + auth_err).strip())
+    if auth_code != 0:
+        return (
+            False,
+            "\n\n".join(part for part in logs if part.strip()),
+            "需要先在终端执行 `gh auth login -w` 完成 GitHub 登录，然后回来再点一次。",
+        )
+
+    if not ssh_default_key_exists():
+        g_code, g_out, g_err = ssh_generate_default_key(key_comment)
+        logs.append("$ ssh-keygen -t ed25519 ...\n" + (g_out + g_err).strip())
+        if g_code != 0 and not ssh_default_key_exists():
+            return (
+                False,
+                "\n\n".join(part for part in logs if part.strip()),
+                "默认 SSH 密钥生成失败，请检查上方日志。",
+            )
+
+    h_code, h_out, h_err = ssh_accept_github_hostkey()
+    logs.append("$ ssh-keyscan github.com\n" + (h_out + h_err).strip())
+
+    a_code, a_out, a_err = gh_add_ssh_key(str(ssh_default_pubkey_path()), key_title)
+    logs.append("$ gh ssh-key add ...\n" + (a_out + a_err).strip())
+
+    t_code, t_out, t_err = ssh_test_github_connection()
+    test_output = (t_out + t_err).strip()
+    logs.append("$ ssh -T git@github.com\n" + test_output)
+    if _ssh_auth_ok(test_output):
+        return True, "\n\n".join(part for part in logs if part.strip()), None
+
+    if a_code != 0:
+        return (
+            False,
+            "\n\n".join(part for part in logs if part.strip()),
+            "公钥上传未成功，请检查 gh 权限或网络；若你确认 key 已上传，可直接在终端执行 `ssh -T git@github.com` 自检。",
+        )
+
+    if h_code != 0 and t_code != 0:
+        return (
+            False,
+            "\n\n".join(part for part in logs if part.strip()),
+            "主机指纹或 SSH 认证未完成，请在终端执行 `ssh -T git@github.com` 查看详细原因。",
+        )
+
+    return (
+        False,
+        "\n\n".join(part for part in logs if part.strip()),
+        "SSH 连通性还未确认通过，请在终端执行 `ssh -T git@github.com` 查看详细原因。",
+    )
+
+
+def _ensure_opencode_dirs(root: Path) -> None:
+    for sub in ("bin", "lib", "config", "data", "state", "config/opencode"):
+        (root / sub).mkdir(parents=True, exist_ok=True)
+
+
+def _install_opencode_cli(root: Path) -> tuple[int, str, str]:
+    root.mkdir(parents=True, exist_ok=True)
+    _ensure_opencode_dirs(root)
+    return run_cmd(
+        ["npm", "install", "-g", "opencode-ai", "--prefix", str(root)],
+        cwd=str(root),
+        timeout=1200,
+    )
+
+
+def _apply_runtime_config(root: Path) -> tuple[bool, str]:
+    pub = public_config_path()
+    sec = secrets_config_path()
+    if not pub.is_file():
+        return False, f"缺少 `{pub}`"
+    try:
+        write_env_init(root)
+        write_merged_to_opencode(pub, sec, root)
+        return True, "已更新 env_init.sh 和 config/opencode/opencode.json"
+    except Exception as e:
+        return False, str(e)
+
+
+def _save_git_identity(
+    name: str, email: str, *, write_global: bool
+) -> tuple[bool, str]:
+    outputs: list[str] = []
+    success = True
+    for global_scope in [False, True] if write_global else [False]:
+        n_code, n_out, n_err = git_set_config(
+            "user.name", name, global_scope=global_scope
+        )
+        e_code, e_out, e_err = git_set_config(
+            "user.email", email, global_scope=global_scope
+        )
+        outputs.append(n_out + n_err + e_out + e_err)
+        success = success and n_code == 0 and e_code == 0
+    return success, "".join(outputs)
+
+
+def _load_import_candidate(
+    root: Path, src: str, upload, paste: str
+) -> tuple[str | None, str | None]:
+    if upload is not None:
+        return upload.getvalue().decode("utf-8", errors="replace"), None
+    if src.strip():
+        p = Path(src.strip()).expanduser()
+        if not p.is_absolute():
+            p = (root / p).resolve()
+        else:
+            p = p.resolve()
+        if not p.is_file():
+            return None, f"文件不存在：{p}"
+        return p.read_text(encoding="utf-8"), None
+    if paste.strip():
+        return paste, None
+    return None, "请填路径、上传文件或粘贴 JSON"
+
+
+def _import_into_tracked_config(
+    root: Path,
+    *,
+    src: str,
+    upload,
+    paste: str,
+    overwrite: bool,
+) -> tuple[bool, str, tuple[dict, dict] | None]:
+    text, err = _load_import_candidate(root, src, upload, paste)
+    if err:
+        return False, err, None
+
+    try:
+        full = parse_json_object(text or "")
+        pub_d, sec_d = split_public_and_secrets(full)
+        validate_public(pub_d)
+        validate_secrets(sec_d)
+    except Exception as e:
+        return False, str(e), None
+
+    pp = public_config_path()
+    sp = secrets_config_path()
+    if pp.is_file() and not overwrite:
+        return False, "public 已存在，勾选覆盖后再试", (pub_d, sec_d)
+    if sp.is_file() and not overwrite:
+        return False, "secrets 已存在，勾选覆盖后再试", (pub_d, sec_d)
+
+    try:
+        save_json_file(pp, pub_d)
+        save_json_file(sp, sec_d)
+    except Exception as e:
+        return False, str(e), (pub_d, sec_d)
+
+    return True, "已写入 tracked_config", (pub_d, sec_d)
+
+
 def render_deploy(root: Path) -> None:
     st.subheader("分步部署（进阶）")
     root_res = root.resolve()
@@ -117,84 +303,70 @@ def render_deploy(root: Path) -> None:
     st.markdown("**终端里加载环境（与快速开始顶部相同）：**")
     st.code(f'source "{root_res / "env_init.sh"}"', language="bash")
 
-    bin_oc = root / "bin" / "opencode"
-    extra = st.text_input(
-        "子进程参数（留空则用 --version）",
-        value="",
-        key="opencode_cli_args",
-        help="例如 --help；多个参数用空格分隔（简单拆分，不含引号转义）",
-    )
-    if st.button("在界面内运行 opencode（便携环境）", type="primary", key="opencode_in_app"):
-        if not bin_oc.is_file():
-            st.error(f"未找到 `{bin_oc}`，请先执行 npm 安装。")
-        else:
-            argv = [str(bin_oc)]
-            raw = (extra or "").strip()
-            if raw:
-                argv.extend(raw.split())
-            else:
-                argv.append("--version")
-            with st.spinner("运行中…"):
-                code, out, err = run_cmd(argv, cwd=str(root), timeout=120, env=opencode_subprocess_env(root))
-            st.code(out + err, language="text")
-            if code != 0:
-                st.error(f"退出码 {code}")
-            else:
-                st.success("子进程执行完成（环境已与 env_init.sh 对齐）")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("创建目录结构", type="secondary", key="mk_dirs"):
-            for sub in ("bin", "lib", "config", "data", "state", "config/opencode"):
-                (root / sub).mkdir(parents=True, exist_ok=True)
-            st.success("已创建 bin / lib / config / data / state / config/opencode")
-    with c2:
-        st.caption("需本机 **Node.js** 与 **npm**。")
+    st.caption("常用只需要下面两个主按钮：先补齐本机环境，再写入运行配置。")
 
-    if st.button("npm install -g opencode-ai（--prefix）", type="primary", key="npm_inst"):
-        root.mkdir(parents=True, exist_ok=True)
-        log_box = st.empty()
-        with st.spinner("npm install…"):
-            code, out, err = run_cmd(
-                ["npm", "install", "-g", "opencode-ai", "--prefix", str(root)],
-                cwd=str(root),
-                timeout=1200,
-            )
-        log_box.code(out + err, language="text")
-        bin_oc = root / "bin" / "opencode"
+    if st.button("一键补齐本机 OpenCode 环境", type="primary", key="deploy_setup_all"):
+        with st.spinner("正在安装/更新 OpenCode CLI..."):
+            code, out, err = _install_opencode_cli(root)
+        st.code(out + err, language="text")
         if code != 0:
             st.error(f"npm 退出码 {code}")
-        elif not bin_oc.is_file():
+        elif not (root / "bin" / "opencode").is_file():
             st.error("未找到 bin/opencode")
         else:
-            st.success(str(bin_oc))
-            st.caption("可用上方「在界面内运行 opencode」自检；终端里日常用仍需 `source …/env_init.sh`。")
-
-    if st.button("生成/更新 env_init.sh", key="env_init"):
-        try:
-            path = write_env_init(root)
-            st.success(f"已写入 `{path}`")
-            st.markdown("在要用 OpenCode 的**终端**里执行：")
-            st.code(f"source {path}", language="bash")
-            st.code(path.read_text(encoding="utf-8"), language="bash")
-        except OSError as e:
-            st.error(str(e))
-
-    st.divider()
-    st.caption("将 `tracked_config` 中 public + secrets **合并**写入本机 OpenCode")
-    if st.button("合并写入 opencode.json", type="primary", key="merge_cfg"):
-        pub = public_config_path()
-        sec = secrets_config_path()
-        if not pub.is_file():
-            st.error(f"缺少 `{pub}`")
-        else:
             try:
-                write_merged_to_opencode(pub, sec, root)
-                st.success("已写入 config/opencode/opencode.json")
-                st.caption(
-                    "若终端里已在跑 OpenCode，可能需要**重启 OpenCode**；新开终端请先 "
-                    f"`source {root}/env_init.sh` 再运行 `opencode`。"
-                )
-            except Exception as e:
+                path = write_env_init(root)
+                st.success(f"已补齐 CLI 与环境文件：`{path}`")
+            except OSError as e:
+                st.error(str(e))
+
+    st.caption("配置改完后，点一次把 public + secrets 合并写入运行目录。")
+    if st.button("一键写入运行配置", type="primary", key="deploy_apply_runtime"):
+        ok, msg = _apply_runtime_config(root)
+        if ok:
+            st.success(msg)
+            st.caption(
+                f"若终端里已在跑 OpenCode，可能需要重启；新开终端先执行 `source {root}/env_init.sh`。"
+            )
+        else:
+            st.error(msg)
+
+    with st.expander("手动步骤与自检", expanded=False):
+        bin_oc = root / "bin" / "opencode"
+        extra = st.text_input(
+            "子进程参数（留空则用 --version）",
+            value="",
+            key="opencode_cli_args",
+            help="例如 --help；多个参数用空格分隔（简单拆分，不含引号转义）",
+        )
+        if st.button("在界面内运行 opencode", key="opencode_in_app"):
+            if not bin_oc.is_file():
+                st.error(f"未找到 `{bin_oc}`，请先安装 CLI。")
+            else:
+                argv = [str(bin_oc)]
+                raw = (extra or "").strip()
+                if raw:
+                    argv.extend(raw.split())
+                else:
+                    argv.append("--version")
+                with st.spinner("运行中…"):
+                    code, out, err = run_cmd(
+                        argv,
+                        cwd=str(root),
+                        timeout=120,
+                        env=opencode_subprocess_env(root),
+                    )
+                st.code(out + err, language="text")
+                if code != 0:
+                    st.error(f"退出码 {code}")
+                else:
+                    st.success("子进程执行完成")
+        if st.button("仅生成/更新 env_init.sh", key="env_init"):
+            try:
+                path = write_env_init(root)
+                st.success(f"已写入 `{path}`")
+                st.code(f"source {path}", language="bash")
+            except OSError as e:
                 st.error(str(e))
 
 
@@ -240,14 +412,29 @@ def render_config(root: Path) -> None:
             with st.expander(f"Provider **{name}**", expanded=False):
                 base_default = str(opts.get("baseURL", "") or "")
                 key_default = str(opts.get("apiKey", "") or "")
-                base = st.text_input("baseURL", value=base_default, key=f"d_base_{name}")
-                api_key = st.text_input("apiKey（secrets）", value=key_default, type="password", key=f"d_key_{name}")
+                base = st.text_input(
+                    "baseURL", value=base_default, key=f"d_base_{name}"
+                )
+                api_key = st.text_input(
+                    "apiKey（secrets）",
+                    value=key_default,
+                    type="password",
+                    key=f"d_key_{name}",
+                )
                 if "provider" not in edited_public:
                     edited_public["provider"] = {}
-                if name not in edited_public["provider"] or not isinstance(edited_public["provider"][name], dict):
-                    pub_spec = public.get("provider", {}).get(name) if isinstance(public.get("provider"), dict) else None
+                if name not in edited_public["provider"] or not isinstance(
+                    edited_public["provider"][name], dict
+                ):
+                    pub_spec = (
+                        public.get("provider", {}).get(name)
+                        if isinstance(public.get("provider"), dict)
+                        else None
+                    )
                     edited_public["provider"][name] = (
-                        deepcopy(pub_spec) if isinstance(pub_spec, dict) else strip_api_keys(deepcopy(spec))
+                        deepcopy(pub_spec)
+                        if isinstance(pub_spec, dict)
+                        else strip_api_keys(deepcopy(spec))
                     )
                 po = edited_public["provider"][name]
                 if "options" not in po or not isinstance(po["options"], dict):
@@ -257,7 +444,9 @@ def render_config(root: Path) -> None:
 
                 if "provider" not in edited_secrets:
                     edited_secrets["provider"] = {}
-                if name not in edited_secrets["provider"] or not isinstance(edited_secrets["provider"][name], dict):
+                if name not in edited_secrets["provider"] or not isinstance(
+                    edited_secrets["provider"][name], dict
+                ):
                     edited_secrets["provider"][name] = {"options": {}}
                 if "options" not in edited_secrets["provider"][name]:
                     edited_secrets["provider"][name]["options"] = {}
@@ -332,7 +521,9 @@ def render_git_and_import(root: Path) -> None:
         c_name_local, o_name_local, _ = git_get_config("user.name", global_scope=False)
         c_mail_local, o_mail_local, _ = git_get_config("user.email", global_scope=False)
         c_name_global, o_name_global, _ = git_get_config("user.name", global_scope=True)
-        c_mail_global, o_mail_global, _ = git_get_config("user.email", global_scope=True)
+        c_mail_global, o_mail_global, _ = git_get_config(
+            "user.email", global_scope=True
+        )
 
         local_name = (o_name_local or "").strip() if c_name_local == 0 else ""
         local_email = (o_mail_local or "").strip() if c_mail_local == 0 else ""
@@ -344,7 +535,9 @@ def render_git_and_import(root: Path) -> None:
         if effective_name and effective_email:
             st.caption(f"当前生效身份：{effective_name} <{effective_email}>")
         else:
-            st.warning("当前未检测到完整 Git 身份，提交会失败。请先设置 user.name 和 user.email。")
+            st.warning(
+                "当前未检测到完整 Git 身份，提交会失败。请先设置 user.name 和 user.email。"
+            )
 
         st.caption(
             f"仓库级：name={local_name or '(未设置)'} / email={local_email or '(未设置)'}；"
@@ -363,36 +556,26 @@ def render_git_and_import(root: Path) -> None:
             key="dash_git_user_email",
             placeholder="you@example.com",
         )
-        i1, i2 = st.columns(2)
-        with i1:
-            if st.button("设置当前仓库身份", key="git_set_identity_local"):
-                if not id_name.strip() or not id_email.strip():
-                    st.warning("请同时填写 user.name 和 user.email")
+        save_global_identity = st.checkbox(
+            "同时写入全局 Git 身份（--global）",
+            value=False,
+            key="git_set_identity_global_toggle",
+        )
+        if st.button("保存 Git 身份", type="primary", key="git_set_identity_main"):
+            if not id_name.strip() or not id_email.strip():
+                st.warning("请同时填写 user.name 和 user.email")
+            else:
+                ok, output = _save_git_identity(
+                    id_name.strip(), id_email.strip(), write_global=save_global_identity
+                )
+                st.code(output, language="text")
+                if ok:
+                    scope = "全局" if save_global_identity else "当前仓库"
+                    st.success(f"已写入{scope} Git 身份")
+                    st.rerun()
                 else:
-                    n_code, n_out, n_err = git_set_config("user.name", id_name.strip(), global_scope=False)
-                    e_code, e_out, e_err = git_set_config("user.email", id_email.strip(), global_scope=False)
-                    st.code(n_out + n_err + e_out + e_err, language="text")
-                    if n_code == 0 and e_code == 0:
-                        st.success("已写入当前仓库 Git 身份")
-                        st.rerun()
-                    else:
-                        st.error("设置失败，请检查上方日志")
-        with i2:
-            if st.button("设置全局身份（--global）", key="git_set_identity_global"):
-                if not id_name.strip() or not id_email.strip():
-                    st.warning("请同时填写 user.name 和 user.email")
-                else:
-                    n_code, n_out, n_err = git_set_config("user.name", id_name.strip(), global_scope=True)
-                    e_code, e_out, e_err = git_set_config("user.email", id_email.strip(), global_scope=True)
-                    st.code(n_out + n_err + e_out + e_err, language="text")
-                    if n_code == 0 and e_code == 0:
-                        st.success("已写入全局 Git 身份")
-                        st.rerun()
-                    else:
-                        st.error("设置失败，请检查上方日志")
+                    st.error("设置失败，请检查上方日志")
 
-        if st.button("刷新状态", key="git_refresh"):
-            st.rerun()
         code, out, err = git_status()
         if code != 0:
             st.error("git status 失败")
@@ -402,9 +585,98 @@ def render_git_and_import(root: Path) -> None:
             st.caption("diff --stat")
             st.code(o2 + e2, language="text")
 
-        msg = st.text_input("提交说明", value="chore: update tracked_config", key="dash_git_msg")
-        g1, g2, g3 = st.columns(3)
-        with g1:
+        st.divider()
+        st.markdown("#### GitHub SSH 一键配置（gh）")
+        st.caption(
+            "默认点一次就行：自动安装 `gh`、生成默认 SSH 密钥、上传公钥并测试连通性。"
+        )
+
+        default_pub = ssh_default_pubkey_path()
+        st.caption(f"默认公钥路径：`{default_pub}`")
+
+        with st.expander("高级选项", expanded=False):
+            key_comment = st.text_input(
+                "SSH key 注释（comment）",
+                value="opencode_quickstart@github",
+                key="dash_ssh_comment",
+            )
+            key_title = st.text_input(
+                "GitHub 上显示的 key 标题",
+                value="opencode-quickstart-key",
+                key="dash_ssh_title",
+            )
+
+        key_comment = st.session_state.get(
+            "dash_ssh_comment", "opencode_quickstart@github"
+        )
+        key_title = st.session_state.get("dash_ssh_title", "opencode-quickstart-key")
+
+        gh_code, gh_out, gh_err = gh_cli_version()
+        auth_code, auth_out, auth_err = (
+            gh_auth_status() if gh_code == 0 else (1, "", "")
+        )
+
+        if gh_code == 0 and auth_code != 0:
+            st.warning("当前还没有登录 GitHub。这个步骤请直接在命令行完成。")
+            st.markdown("**请在终端执行**")
+            st.code(
+                "/root/.local/bin/gh auth login --hostname github.com --git-protocol ssh --web",
+                language="bash",
+            )
+            st.caption(
+                "终端里会显示验证码；在 GitHub 页面完成授权后，回来点“检查 GitHub 登录状态”。"
+            )
+            if st.button("检查 GitHub 登录状态", key="gh_auth_refresh"):
+                st.rerun()
+
+        if gh_code == 0 and auth_code == 0:
+            st.caption("当前 `gh` 已登录 GitHub。")
+
+        if st.button("一键准备 GitHub SSH", type="primary", key="gh_setup_all"):
+            with st.spinner("正在准备 GitHub SSH..."):
+                ok, logs, hint = _run_github_ssh_quick_setup(
+                    (key_comment or "").strip() or "opencode_quickstart@github",
+                    (key_title or "").strip() or "opencode-quickstart-key",
+                )
+            if logs.strip():
+                st.code(logs, language="text")
+            if ok:
+                st.success("GitHub SSH 已就绪，可以直接 push。")
+            elif hint:
+                st.warning(hint)
+
+        with st.expander("手动排查", expanded=False):
+            if gh_code == 0 and auth_code == 0:
+                st.caption("当前 `gh` 已安装且已登录。")
+            else:
+                st.code(
+                    (gh_out + gh_err + auth_out + auth_err).strip(), language="text"
+                )
+            if st.button("仅测试 GitHub SSH 连通性", key="gh_test_ssh"):
+                t_code, t_out, t_err = ssh_test_github_connection()
+                st.code(t_out + t_err, language="text")
+                if _ssh_auth_ok(t_out + t_err):
+                    st.success("SSH 认证通过，可以 push。")
+                else:
+                    st.warning("未检测到认证成功信息，请根据日志排查。")
+
+        st.divider()
+        st.caption(
+            "仅提交并 push `tracked_config/opencode.public.json`（与侧栏「自动同步」相同逻辑）"
+        )
+        if st.button("一键同步 public 到远程", type="primary", key="git_sync_now"):
+            ok, log = git_sync_public_json_to_remote()
+            if ok:
+                st.success(log)
+            else:
+                st.error(log)
+
+        with st.expander("手动 Git 操作", expanded=False):
+            msg = st.text_input(
+                "提交说明", value="chore: update tracked_config", key="dash_git_msg"
+            )
+            if st.button("刷新状态", key="git_refresh"):
+                st.rerun()
             if st.button("add + commit（全部）", key="git_ac"):
                 if not msg.strip():
                     st.warning("请填写提交说明")
@@ -418,14 +690,12 @@ def render_git_and_import(root: Path) -> None:
                         st.code(c_out + c_err, language="text")
                         if c_code == 0:
                             st.success("已提交")
-        with g2:
             if st.button("pull --ff-only", key="git_pl"):
                 with st.spinner("pull…"):
                     p_code, p_out, p_err = git_pull()
                 st.code(p_out + p_err, language="text")
                 if p_code != 0:
                     st.error("pull 失败")
-        with g3:
             if st.button("push", key="git_ps"):
                 with st.spinner("push…"):
                     s_code, s_out, s_err = git_push()
@@ -447,128 +717,44 @@ def render_git_and_import(root: Path) -> None:
                     else:
                         st.error("设置 upstream 失败")
 
-        st.divider()
-        st.markdown("#### GitHub SSH 一键配置（gh）")
-        gh_code, gh_out, gh_err = gh_cli_version()
-        if gh_code != 0:
-            st.warning("未检测到 gh CLI，无法一键上传 SSH 公钥。请先安装 gh。")
-            st.code(gh_out + gh_err, language="text")
-            if st.button("一键安装 gh CLI", key="gh_install_cli"):
-                with st.spinner("正在安装 gh CLI（可能需要一点时间）..."):
-                    i_code, i_out, i_err = install_gh_cli()
-                st.code(i_out + i_err, language="text")
-                if i_code == 0:
-                    st.success("gh CLI 安装完成")
-                    st.rerun()
-                else:
-                    st.error("自动安装失败，请根据日志手动安装 gh")
-        else:
-            auth_code, auth_out, auth_err = gh_auth_status()
-            if auth_code == 0:
-                st.caption("gh 登录状态：已登录")
-            else:
-                st.warning("gh 未登录。请先在终端执行 `gh auth login`。")
-                st.code(auth_out + auth_err, language="text")
-
-            default_pub = ssh_default_pubkey_path()
-            has_default_key = ssh_default_key_exists()
-            st.caption(f"默认公钥路径：`{default_pub}`")
-            if has_default_key:
-                st.caption("已检测到默认 SSH 密钥（id_ed25519）。")
-            else:
-                st.caption("未检测到默认 SSH 密钥，可一键生成。")
-
-            key_comment = st.text_input(
-                "SSH key 注释（comment）",
-                value="opencode_quickstart@github",
-                key="dash_ssh_comment",
-            )
-            key_title = st.text_input(
-                "GitHub 上显示的 key 标题",
-                value="opencode-quickstart-key",
-                key="dash_ssh_title",
-            )
-            k1, k2 = st.columns(2)
-            with k1:
-                if st.button("生成默认 SSH 密钥", key="gh_gen_ssh"):
-                    g_code, g_out, g_err = ssh_generate_default_key((key_comment or "").strip() or "gh-key")
-                    st.code(g_out + g_err, language="text")
-                    if g_code == 0:
-                        st.success("SSH 密钥已生成")
-                        st.rerun()
-                    else:
-                        st.error("生成失败（可能已存在同名密钥）")
-            with k2:
-                if st.button("上传默认公钥到 GitHub", key="gh_add_ssh"):
-                    if auth_code != 0:
-                        st.error("gh 未登录，请先执行 `gh auth login`")
-                    elif not ssh_default_key_exists():
-                        st.error("未找到默认公钥，请先生成密钥")
-                    else:
-                        a_code, a_out, a_err = gh_add_ssh_key(str(ssh_default_pubkey_path()), (key_title or "").strip() or "default-key")
-                        st.code(a_out + a_err, language="text")
-                        if a_code == 0:
-                            st.success("已上传公钥到当前 GitHub 账号")
-                        else:
-                            st.error("上传失败，请检查 gh 权限或网络")
-
-            if st.button("测试 GitHub SSH 连通性", key="gh_test_ssh"):
-                t_code, t_out, t_err = ssh_test_github_connection()
-                st.code(t_out + t_err, language="text")
-                # ssh -T to GitHub returns exit code 1 even on successful auth (no shell access).
-                txt = (t_out + t_err).lower()
-                if "successfully authenticated" in txt:
-                    st.success("SSH 认证通过，可以 push。")
-                else:
-                    st.warning("未检测到认证成功信息，请根据日志排查。")
-            if st.button("仅信任 GitHub 主机指纹（不做认证）", key="gh_accept_hostkey"):
-                h_code, h_out, h_err = ssh_accept_github_hostkey()
-                st.code(h_out + h_err, language="text")
-                # Host key may be added even when auth fails; this still unblocks yes/no prompt.
-                if h_code == 0:
-                    st.success("已信任 GitHub 主机指纹。")
-                else:
-                    st.warning("已尝试写入 GitHub 主机指纹（即便认证失败，通常也已解除 yes/no 卡住问题）。")
-
-        st.divider()
-        st.caption("仅提交并 push `tracked_config/opencode.public.json`（与侧栏「自动同步」相同逻辑）")
-        if st.button("立即同步 public 到远程", key="git_sync_now"):
-            ok, log = git_sync_public_json_to_remote()
-            if ok:
-                st.success(log)
-            else:
-                st.error(log)
-
     st.divider()
     st.markdown("**从现有 opencode.json 导入**（拆成 public + secrets）")
     src = st.text_input("文件路径（可相对 OpenCode 根）", key="dash_import_path")
     up = st.file_uploader("或上传 JSON", type=["json"], key="dash_import_up")
-    if st.button("预览拆分", key="dash_import_prev"):
-        text: str | None = None
-        if up is not None:
-            text = up.getvalue().decode("utf-8", errors="replace")
-        elif src.strip():
-            p = Path(src.strip()).expanduser()
-            if not p.is_absolute():
-                p = (root / p).resolve()
-            else:
-                p = p.resolve()
-            if not p.is_file():
-                st.error(f"文件不存在：{p}")
-            else:
-                text = p.read_text(encoding="utf-8")
+    paste = st.text_area("或粘贴完整 JSON", height=160, key="dash_paste")
+    ow = st.checkbox("覆盖已有 public/secrets", value=False, key="dash_import_ow")
+    if st.button("一键导入到 tracked_config", type="primary", key="dash_import_main"):
+        ok, msg, preview = _import_into_tracked_config(
+            root,
+            src=src,
+            upload=up,
+            paste=paste,
+            overwrite=ow,
+        )
+        if preview is not None:
+            st.session_state["_import_preview_dash"] = preview
+        if ok:
+            st.success(msg)
+            _maybe_auto_sync_public()
+            st.rerun()
         else:
-            st.warning("请填路径或上传文件")
-        if text is not None:
-            try:
-                full = parse_json_object(text)
-                pub_d, sec_d = split_public_and_secrets(full)
-                validate_public(pub_d)
-                validate_secrets(sec_d)
-                st.session_state["_import_preview_dash"] = (pub_d, sec_d)
-                st.success("已生成预览")
-            except Exception as e:
-                st.error(str(e))
+            st.error(msg)
+
+    with st.expander("预览拆分结果", expanded=False):
+        if st.button("仅生成预览", key="dash_import_prev"):
+            text, err = _load_import_candidate(root, src, up, paste)
+            if err:
+                st.warning(err)
+            else:
+                try:
+                    full = parse_json_object(text or "")
+                    pub_d, sec_d = split_public_and_secrets(full)
+                    validate_public(pub_d)
+                    validate_secrets(sec_d)
+                    st.session_state["_import_preview_dash"] = (pub_d, sec_d)
+                    st.success("已生成预览")
+                except Exception as e:
+                    st.error(str(e))
 
     prev = st.session_state.get("_import_preview_dash")
     if prev:
@@ -577,36 +763,3 @@ def render_git_and_import(root: Path) -> None:
             st.code(json.dumps(pub_d, indent=2, ensure_ascii=False), language="json")
         with st.expander("预览 secrets"):
             st.code(json.dumps(sec_d, indent=2, ensure_ascii=False), language="json")
-        ow = st.checkbox("覆盖已有 public/secrets", value=False, key="dash_import_ow")
-        if st.button("写入 tracked_config", type="primary", key="dash_import_write"):
-            pp = public_config_path()
-            sp = secrets_config_path()
-            if pp.is_file() and not ow:
-                st.error("public 已存在，勾选覆盖")
-            elif sp.is_file() and not ow:
-                st.error("secrets 已存在，勾选覆盖")
-            else:
-                try:
-                    save_json_file(pp, pub_d)
-                    save_json_file(sp, sec_d)
-                    st.success("已写入")
-                    st.session_state.pop("_import_preview_dash", None)
-                    _maybe_auto_sync_public()
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
-
-    paste = st.text_area("或粘贴完整 JSON", height=160, key="dash_paste")
-    if st.button("从粘贴预览", key="dash_paste_go"):
-        if not paste.strip():
-            st.warning("请粘贴 JSON")
-        else:
-            try:
-                full = parse_json_object(paste)
-                pub_d, sec_d = split_public_and_secrets(full)
-                validate_public(pub_d)
-                validate_secrets(sec_d)
-                st.session_state["_import_preview_dash"] = (pub_d, sec_d)
-                st.rerun()
-            except Exception as e:
-                st.error(str(e))

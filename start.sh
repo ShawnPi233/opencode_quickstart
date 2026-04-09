@@ -169,6 +169,23 @@ _install_uv_with_fallback() {
   return 1
 }
 
+_ensure_modern_gh_cli() {
+  if [[ "${OPENCODE_SKIP_GH_UPGRADE:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  local gh_installer="${ROOT}/install_gh_cli.sh"
+  [[ -x "$gh_installer" || -f "$gh_installer" ]] || return 0
+
+  _uv_path_prepend
+  if bash "$gh_installer"; then
+    _uv_path_prepend
+    return 0
+  fi
+
+  return 1
+}
+
 _file_sha256() {
   local target="$1"
   "$PYTHON_CMD" - "$target" <<'PY'
@@ -240,6 +257,10 @@ if [[ "$MODE" == "ui" ]]; then
 
   _print_progress 20 "准备 UI 运行环境"
   _ensure_ui_runtime
+  _print_progress 35 "检查 gh CLI 版本"
+  if ! _ensure_modern_gh_cli; then
+    _log "warning: gh CLI 自动升级失败；看板内 GitHub 登录可能仍会受旧版本影响。"
+  fi
   _print_progress 45 "检查 Streamlit 依赖状态"
   REQ_FILE="$ROOT/requirements.txt"
   REQ_STAMP="$VENV/.requirements.sha256"

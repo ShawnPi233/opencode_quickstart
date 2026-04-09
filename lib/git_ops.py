@@ -13,6 +13,17 @@ def _repo() -> Path:
     return repo_root()
 
 
+def _gh_bin() -> str:
+    preferred = Path.home() / ".local" / "bin" / "gh"
+    return str(preferred) if preferred.is_file() else "gh"
+
+
+def _gh_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env.setdefault("GH_CONFIG_DIR", str(Path.home() / ".config" / "gh"))
+    return env
+
+
 def git_is_repository() -> bool:
     code, _, _ = run_cmd(
         ["git", "rev-parse", "--is-inside-work-tree"], cwd=_repo(), timeout=30
@@ -121,22 +132,38 @@ def git_sync_public_json_to_remote() -> tuple[bool, str]:
 
 
 def gh_cli_version() -> tuple[int, str, str]:
-    return run_cmd(["gh", "--version"], cwd=_repo(), timeout=30)
+    return run_cmd([_gh_bin(), "--version"], cwd=_repo(), timeout=30, env=_gh_env())
 
 
 def gh_auth_status() -> tuple[int, str, str]:
-    return run_cmd(["gh", "auth", "status"], cwd=_repo(), timeout=30)
+    return run_cmd(
+        [_gh_bin(), "auth", "status"], cwd=_repo(), timeout=30, env=_gh_env()
+    )
+
+
+def gh_auth_login_web() -> tuple[int, str, str]:
+    return run_cmd(
+        [
+            _gh_bin(),
+            "auth",
+            "login",
+            "--hostname",
+            "github.com",
+            "--git-protocol",
+            "ssh",
+            "--web",
+        ],
+        cwd=_repo(),
+        timeout=15,
+        env=_gh_env(),
+    )
 
 
 def install_gh_cli() -> tuple[int, str, str]:
-    shell = (
-        "if command -v gh >/dev/null 2>&1; then gh --version; "
-        "elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y gh; "
-        "elif command -v dnf >/dev/null 2>&1; then dnf install -y gh; "
-        "elif command -v yum >/dev/null 2>&1; then yum install -y gh; "
-        "else echo 'No supported package manager found for gh installation.' >&2; exit 1; fi"
+    script = _repo() / "install_gh_cli.sh"
+    return run_cmd(
+        ["bash", str(script), "--force"], cwd=_repo(), timeout=1200, env=_gh_env()
     )
-    return run_cmd(["bash", "-lc", shell], cwd=_repo(), timeout=1200)
 
 
 def ssh_default_pubkey_path() -> Path:
@@ -163,9 +190,10 @@ def ssh_generate_default_key(comment: str) -> tuple[int, str, str]:
 
 def gh_add_ssh_key(pubkey_path: str, title: str) -> tuple[int, str, str]:
     return run_cmd(
-        ["gh", "ssh-key", "add", pubkey_path, "--title", title],
+        [_gh_bin(), "ssh-key", "add", pubkey_path, "--title", title],
         cwd=_repo(),
         timeout=120,
+        env=_gh_env(),
     )
 
 
