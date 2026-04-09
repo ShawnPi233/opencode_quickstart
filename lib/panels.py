@@ -10,6 +10,9 @@ import streamlit as st
 
 from lib.env_init import opencode_subprocess_env, write_env_init
 from lib.git_ops import (
+    gh_add_ssh_key,
+    gh_auth_status,
+    gh_cli_version,
     git_add_all,
     git_commit,
     git_current_branch,
@@ -23,6 +26,10 @@ from lib.git_ops import (
     git_set_config,
     git_status,
     git_sync_public_json_to_remote,
+    ssh_default_key_exists,
+    ssh_default_pubkey_path,
+    ssh_generate_default_key,
+    ssh_test_github_connection,
 )
 from lib.json_validate import parse_json_object, validate_public, validate_secrets
 from lib.merge_config import (
@@ -437,6 +444,72 @@ def render_git_and_import(root: Path) -> None:
                         st.success(f"已设置 upstream：origin/{branch}")
                     else:
                         st.error("设置 upstream 失败")
+
+        st.divider()
+        st.markdown("#### GitHub SSH 一键配置（gh）")
+        gh_code, gh_out, gh_err = gh_cli_version()
+        if gh_code != 0:
+            st.warning("未检测到 gh CLI，无法一键上传 SSH 公钥。请先安装 gh。")
+            st.code(gh_out + gh_err, language="text")
+        else:
+            auth_code, auth_out, auth_err = gh_auth_status()
+            if auth_code == 0:
+                st.caption("gh 登录状态：已登录")
+            else:
+                st.warning("gh 未登录。请先在终端执行 `gh auth login`。")
+                st.code(auth_out + auth_err, language="text")
+
+            default_pub = ssh_default_pubkey_path()
+            has_default_key = ssh_default_key_exists()
+            st.caption(f"默认公钥路径：`{default_pub}`")
+            if has_default_key:
+                st.caption("已检测到默认 SSH 密钥（id_ed25519）。")
+            else:
+                st.caption("未检测到默认 SSH 密钥，可一键生成。")
+
+            key_comment = st.text_input(
+                "SSH key 注释（comment）",
+                value="opencode_quickstart@github",
+                key="dash_ssh_comment",
+            )
+            key_title = st.text_input(
+                "GitHub 上显示的 key 标题",
+                value="opencode-quickstart-key",
+                key="dash_ssh_title",
+            )
+            k1, k2 = st.columns(2)
+            with k1:
+                if st.button("生成默认 SSH 密钥", key="gh_gen_ssh"):
+                    g_code, g_out, g_err = ssh_generate_default_key((key_comment or "").strip() or "gh-key")
+                    st.code(g_out + g_err, language="text")
+                    if g_code == 0:
+                        st.success("SSH 密钥已生成")
+                        st.rerun()
+                    else:
+                        st.error("生成失败（可能已存在同名密钥）")
+            with k2:
+                if st.button("上传默认公钥到 GitHub", key="gh_add_ssh"):
+                    if auth_code != 0:
+                        st.error("gh 未登录，请先执行 `gh auth login`")
+                    elif not ssh_default_key_exists():
+                        st.error("未找到默认公钥，请先生成密钥")
+                    else:
+                        a_code, a_out, a_err = gh_add_ssh_key(str(ssh_default_pubkey_path()), (key_title or "").strip() or "default-key")
+                        st.code(a_out + a_err, language="text")
+                        if a_code == 0:
+                            st.success("已上传公钥到当前 GitHub 账号")
+                        else:
+                            st.error("上传失败，请检查 gh 权限或网络")
+
+            if st.button("测试 GitHub SSH 连通性", key="gh_test_ssh"):
+                t_code, t_out, t_err = ssh_test_github_connection()
+                st.code(t_out + t_err, language="text")
+                # ssh -T to GitHub returns exit code 1 even on successful auth (no shell access).
+                txt = (t_out + t_err).lower()
+                if "successfully authenticated" in txt:
+                    st.success("SSH 认证通过，可以 push。")
+                else:
+                    st.warning("未检测到认证成功信息，请根据日志排查。")
 
         st.divider()
         st.caption("仅提交并 push `tracked_config/opencode.public.json`（与侧栏「自动同步」相同逻辑）")

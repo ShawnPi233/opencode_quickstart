@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from lib.paths import repo_root
 from lib.run_cmd import run_cmd
 
@@ -69,6 +71,58 @@ def git_set_config(key: str, value: str, *, global_scope: bool = False) -> tuple
         argv.append("--global")
     argv.extend([key, value])
     return run_cmd(git_argv(*argv), cwd=None, timeout=30)
+
+
+def gh_cli_version() -> tuple[int, str, str]:
+    return run_cmd(["gh", "--version"], cwd=None, timeout=30)
+
+
+def gh_auth_status() -> tuple[int, str, str]:
+    return run_cmd(["gh", "auth", "status"], cwd=None, timeout=30)
+
+
+def ssh_default_pubkey_path() -> Path:
+    return Path.home() / ".ssh" / "id_ed25519.pub"
+
+
+def ssh_default_key_exists() -> bool:
+    pub = ssh_default_pubkey_path()
+    pri = pub.with_suffix("")
+    return pub.is_file() and pri.is_file()
+
+
+def ssh_generate_default_key(comment: str) -> tuple[int, str, str]:
+    pub = ssh_default_pubkey_path()
+    pri = pub.with_suffix("")
+    if pub.is_file() or pri.is_file():
+        return 1, "", f"默认密钥已存在：{pri} / {pub}\n"
+    pri.parent.mkdir(parents=True, exist_ok=True)
+    return run_cmd(
+        ["ssh-keygen", "-t", "ed25519", "-C", comment, "-f", str(pri), "-N", ""],
+        cwd=None,
+        timeout=60,
+    )
+
+
+def gh_add_ssh_key(pubkey_path: str, title: str) -> tuple[int, str, str]:
+    return run_cmd(["gh", "ssh-key", "add", pubkey_path, "--title", title], cwd=None, timeout=60)
+
+
+def ssh_test_github_connection() -> tuple[int, str, str]:
+    # `accept-new` avoids first-connect interactive prompt and only trusts first seen host key.
+    return run_cmd(
+        [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-T",
+            "git@github.com",
+        ],
+        cwd=None,
+        timeout=30,
+    )
 
 
 def git_sync_public_json_to_remote(
