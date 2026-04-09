@@ -51,6 +51,7 @@ from lib.skills import (
     delete_skill,
     list_skills,
     load_skill,
+    parse_skill_markdown,
     render_skill_markdown,
     save_skill,
     validate_skill_name,
@@ -519,6 +520,7 @@ def _skill_scope_options() -> tuple[dict[str, object], list[str]]:
 
 def _load_skill_form(scope_key: str, *, record=None) -> None:
     prefix = f"skill_form_{scope_key}_"
+    st.session_state[f"{prefix}raw_markdown"] = ""
     if record is None or record.content is None:
         st.session_state[f"{prefix}original_name"] = ""
         st.session_state[f"{prefix}name"] = ""
@@ -533,6 +535,21 @@ def _load_skill_form(scope_key: str, *, record=None) -> None:
 
     content = record.content
     st.session_state[f"{prefix}original_name"] = record.folder_name
+    st.session_state[f"{prefix}name"] = content.name
+    st.session_state[f"{prefix}description"] = content.description
+    st.session_state[f"{prefix}license"] = content.license
+    st.session_state[f"{prefix}compatibility"] = content.compatibility or "opencode"
+    st.session_state[f"{prefix}metadata"] = json.dumps(
+        content.metadata or {}, indent=2, ensure_ascii=False
+    )
+    st.session_state[f"{prefix}body"] = content.body
+
+
+def _apply_skill_content_to_form(
+    scope_key: str, content: SkillContent, *, original_name: str = ""
+) -> None:
+    prefix = f"skill_form_{scope_key}_"
+    st.session_state[f"{prefix}original_name"] = original_name
     st.session_state[f"{prefix}name"] = content.name
     st.session_state[f"{prefix}description"] = content.description
     st.session_state[f"{prefix}license"] = content.license
@@ -618,6 +635,40 @@ def render_skills() -> None:
             st.warning(current_record.error)
 
     st.markdown("#### 编辑")
+    st.text_area(
+        "完整 SKILL.md（可直接粘贴）",
+        key=f"{prefix}raw_markdown",
+        height=180,
+        help="支持直接粘贴整份 `SKILL.md`，自动解析 frontmatter 和正文到下方表单。",
+    )
+    import_col, clear_col = st.columns(2)
+    with import_col:
+        if st.button("从完整 SKILL.md 解析", key=f"skills_import_markdown_{scope_key}"):
+            try:
+                raw = st.session_state[f"{prefix}raw_markdown"].strip()
+                if not raw:
+                    raise ValueError("请先粘贴完整的 SKILL.md 内容")
+                content = parse_skill_markdown(raw)
+                original_name = st.session_state.get(f"{prefix}original_name", "")
+                _apply_skill_content_to_form(
+                    scope_key,
+                    content,
+                    original_name=original_name
+                    if original_name == content.name
+                    else "",
+                )
+                st.session_state[f"skills_preview_content_{scope_key}"] = (
+                    render_skill_markdown(content)
+                )
+                st.success("已从完整 SKILL.md 解析到表单")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    with clear_col:
+        if st.button("清空粘贴区", key=f"skills_clear_markdown_{scope_key}"):
+            st.session_state[f"{prefix}raw_markdown"] = ""
+            st.rerun()
+
     meta_col1, meta_col2 = st.columns(2)
     with meta_col1:
         st.text_input(
@@ -661,6 +712,10 @@ def render_skills() -> None:
             raise ValueError("description 不能为空")
         return content
 
+    st.info(
+        "保存或删除 skill 后，需重启当前 `opencode` 会话，新的 skill 列表才会生效。"
+    )
+
     save_col, preview_col, delete_col = st.columns(3)
     with save_col:
         if st.button("保存 skill", type="primary", key=f"skills_save_{scope_key}"):
@@ -673,7 +728,9 @@ def render_skills() -> None:
                 st.session_state[f"skills_preview_content_{scope_key}"] = (
                     render_skill_markdown(content)
                 )
-                st.success(f"已保存 `{content.name}`")
+                st.success(
+                    f"已保存 `{content.name}`，重启 `opencode` 后可加载新 skill。"
+                )
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -701,7 +758,9 @@ def render_skills() -> None:
                         st.session_state.pop(
                             f"skills_preview_content_{scope_key}", None
                         )
-                        st.success(f"已删除 `{selected_folder}`")
+                        st.success(
+                            f"已删除 `{selected_folder}`，重启 `opencode` 后当前会话才会更新 skill 列表。"
+                        )
                         st.rerun()
                     except Exception as exc:
                         st.error(str(exc))

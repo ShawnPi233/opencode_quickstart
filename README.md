@@ -125,6 +125,8 @@ bash start.sh ui
 - 删除整个 skill 目录
 - 预览最终生成的 `SKILL.md`
 
+注意：当前 OpenCode 会话通常不会自动热加载新 skill。保存或删除 skill 后，需要重启 `opencode`，新的 skill 列表才会生效。
+
 在这个 quickstart 环境里，`env_init.sh` 会设置：
 
 ```bash
