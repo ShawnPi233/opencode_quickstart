@@ -13,6 +13,7 @@ from lib.git_ops import (
     gh_add_ssh_key,
     gh_auth_status,
     gh_cli_version,
+    install_gh_cli,
     git_add_all,
     git_commit,
     git_current_branch,
@@ -451,6 +452,15 @@ def render_git_and_import(root: Path) -> None:
         if gh_code != 0:
             st.warning("未检测到 gh CLI，无法一键上传 SSH 公钥。请先安装 gh。")
             st.code(gh_out + gh_err, language="text")
+            if st.button("一键安装 gh CLI", key="gh_install_cli"):
+                with st.spinner("正在安装 gh CLI（可能需要一点时间）..."):
+                    i_code, i_out, i_err = install_gh_cli()
+                st.code(i_out + i_err, language="text")
+                if i_code == 0:
+                    st.success("gh CLI 安装完成")
+                    st.rerun()
+                else:
+                    st.error("自动安装失败，请根据日志手动安装 gh")
         else:
             auth_code, auth_out, auth_err = gh_auth_status()
             if auth_code == 0:

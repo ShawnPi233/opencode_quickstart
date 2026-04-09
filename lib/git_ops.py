@@ -77,6 +77,21 @@ def gh_cli_version() -> tuple[int, str, str]:
     return run_cmd(["gh", "--version"], cwd=None, timeout=30)
 
 
+def install_gh_cli() -> tuple[int, str, str]:
+    cmd = (
+        "set -e;"
+        " if command -v gh >/dev/null 2>&1; then echo 'gh already installed'; exit 0; fi;"
+        " if command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y gh; exit $?; fi;"
+        " if command -v dnf >/dev/null 2>&1; then dnf install -y gh; exit $?; fi;"
+        " if command -v yum >/dev/null 2>&1; then yum install -y gh; exit $?; fi;"
+        " if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm github-cli; exit $?; fi;"
+        " if command -v zypper >/dev/null 2>&1; then zypper --non-interactive install gh; exit $?; fi;"
+        " if command -v apk >/dev/null 2>&1; then apk add --no-cache github-cli; exit $?; fi;"
+        " echo 'No supported package manager found for automatic gh install' >&2; exit 1"
+    )
+    return run_cmd(["bash", "-lc", cmd], cwd=None, timeout=1800)
+
+
 def gh_auth_status() -> tuple[int, str, str]:
     return run_cmd(["gh", "auth", "status"], cwd=None, timeout=30)
 
