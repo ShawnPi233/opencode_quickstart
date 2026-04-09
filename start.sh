@@ -169,6 +169,18 @@ _install_uv_with_fallback() {
   return 1
 }
 
+_file_sha256() {
+  local target="$1"
+  "$PYTHON_CMD" - "$target" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+print(hashlib.sha256(path.read_bytes()).hexdigest())
+PY
+}
+
 _print_progress 5 "检查运行环境"
 
 PYTHON_CMD="$(_find_python_cmd)" || _die "未找到 python3/python，请先安装 Python 3。"
@@ -228,9 +240,39 @@ if [[ "$MODE" == "ui" ]]; then
 
   _print_progress 20 "准备 UI 运行环境"
   _ensure_ui_runtime
-  _print_progress 45 "安装 Streamlit 依赖"
-  _log "正在安装看板依赖..."
-  uv pip install -q -r "$ROOT/requirements.txt" --python "$VENV/bin/python" "${PIP_INDEX_EXTRA[@]}"
+  _print_progress 45 "检查 Streamlit 依赖状态"
+  REQ_FILE="$ROOT/requirements.txt"
+  REQ_STAMP="$VENV/.requirements.sha256"
+  REQ_HASH=""
+  if REQ_HASH="$(_file_sha256 "$REQ_FILE" 2>/dev/null)"; then
+    INSTALLED_REQ_HASH=""
+    if [[ -f "$REQ_STAMP" ]]; then
+      INSTALLED_REQ_HASH="$(tr -d '\r\n' < "$REQ_STAMP")"
+    fi
+
+    if [[ "${OPENCODE_FORCE_UI_DEPS:-0}" == "1" || "$REQ_HASH" != "$INSTALLED_REQ_HASH" ]]; then
+      _print_progress 60 "安装 Streamlit 依赖"
+      if [[ "$_PROGRESS_TTY" -eq 1 ]]; then
+        printf '\n'
+      fi
+      _log "正在安装看板依赖..."
+      uv pip install -q -r "$REQ_FILE" --python "$VENV/bin/python" "${PIP_INDEX_EXTRA[@]}"
+      printf '%s\n' "$REQ_HASH" > "$REQ_STAMP"
+    else
+      _print_progress 60 "依赖已是最新，跳过安装"
+      if [[ "$_PROGRESS_TTY" -eq 1 ]]; then
+        printf '\n'
+      fi
+      _log "看板依赖未变更，跳过安装。"
+    fi
+  else
+    _print_progress 60 "依赖状态未知，执行安装"
+    if [[ "$_PROGRESS_TTY" -eq 1 ]]; then
+      printf '\n'
+    fi
+    _log "无法计算依赖指纹，回退为执行依赖安装..."
+    uv pip install -q -r "$REQ_FILE" --python "$VENV/bin/python" "${PIP_INDEX_EXTRA[@]}"
+  fi
   _print_progress 100 "启动 Streamlit"
   _log "正在启动 Streamlit，退出请按 Ctrl+C。"
   exec "$VENV/bin/streamlit" run "$ROOT/app.py" "$@"

@@ -27,6 +27,7 @@ from lib.git_ops import (
     git_set_config,
     git_status,
     git_sync_public_json_to_remote,
+    ssh_accept_github_hostkey,
     ssh_default_key_exists,
     ssh_default_pubkey_path,
     ssh_generate_default_key,
@@ -520,6 +521,14 @@ def render_git_and_import(root: Path) -> None:
                     st.success("SSH 认证通过，可以 push。")
                 else:
                     st.warning("未检测到认证成功信息，请根据日志排查。")
+            if st.button("仅信任 GitHub 主机指纹（不做认证）", key="gh_accept_hostkey"):
+                h_code, h_out, h_err = ssh_accept_github_hostkey()
+                st.code(h_out + h_err, language="text")
+                # Host key may be added even when auth fails; this still unblocks yes/no prompt.
+                if h_code == 0:
+                    st.success("已信任 GitHub 主机指纹。")
+                else:
+                    st.warning("已尝试写入 GitHub 主机指纹（即便认证失败，通常也已解除 yes/no 卡住问题）。")
 
         st.divider()
         st.caption("仅提交并 push `tracked_config/opencode.public.json`（与侧栏「自动同步」相同逻辑）")
