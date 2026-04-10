@@ -7,7 +7,12 @@ from pathlib import Path
 
 import streamlit as st
 
-from lib.paths import default_opencode_root, load_ui_settings, resolve_opencode_root, save_ui_settings
+from lib.paths import (
+    default_opencode_root,
+    load_ui_settings,
+    resolve_opencode_root,
+    save_ui_settings,
+)
 
 
 def render_opencode_root_sidebar() -> Path:
@@ -50,10 +55,14 @@ def _render_git_auto_sync_toggle() -> None:
     st.sidebar.markdown("### Git 自动同步")
     settings = load_ui_settings()
     if "git_auto_sync_enabled" not in st.session_state:
-        st.session_state.git_auto_sync_enabled = bool(settings.get("git_auto_sync_enabled", False))
+        st.session_state.git_auto_sync_enabled = bool(
+            settings.get("git_auto_sync_enabled", False)
+        )
 
     def _on_sync_change() -> None:
-        save_ui_settings({"git_auto_sync_enabled": bool(st.session_state.git_auto_sync_enabled)})
+        save_ui_settings(
+            {"git_auto_sync_enabled": bool(st.session_state.git_auto_sync_enabled)}
+        )
 
     st.sidebar.checkbox(
         "保存公开配置后自动 push",
@@ -62,6 +71,6 @@ def _render_git_auto_sync_toggle() -> None:
         help=(
             "开启后，每次成功写入 `tracked_config/opencode.public.json`（含提供商表单、主题、导入 public）时，"
             "会自动 `git add` 该文件、`commit`（有变更时）并 `git push`。"
-            "不会提交 `opencode.secrets.json`。请自行使用**私有**远程仓库并配置好 origin 与凭据。"
+            "不会提交 `opencode.secrets.json`。请先在「Git / 导入」里把 `origin` 配成你自己的仓库，并准备好凭据。"
         ),
     )

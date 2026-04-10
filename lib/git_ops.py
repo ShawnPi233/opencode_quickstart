@@ -69,6 +69,26 @@ def git_remote_verbose() -> tuple[int, str, str]:
     return run_cmd(["git", "remote", "-v"], cwd=_repo(), timeout=30)
 
 
+def git_get_remote_url(name: str) -> tuple[int, str, str]:
+    return run_cmd(["git", "remote", "get-url", name], cwd=_repo(), timeout=30)
+
+
+def git_set_remote_url(name: str, url: str) -> tuple[int, str, str]:
+    code, out, err = git_get_remote_url(name)
+    argv = (
+        ["git", "remote", "set-url", name, url]
+        if code == 0
+        else [
+            "git",
+            "remote",
+            "add",
+            name,
+            url,
+        ]
+    )
+    return run_cmd(argv, cwd=_repo(), timeout=30)
+
+
 def git_get_config(key: str, *, global_scope: bool) -> tuple[int, str, str]:
     argv = ["git", "config"]
     if global_scope:

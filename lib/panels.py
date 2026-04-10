@@ -19,11 +19,13 @@ from lib.git_ops import (
     git_current_branch,
     git_diff_stat,
     git_get_config,
+    git_get_remote_url,
     git_is_repository,
     git_pull,
     git_push,
     git_push_set_upstream_origin,
     git_remote_verbose,
+    git_set_remote_url,
     git_set_config,
     git_status,
     git_sync_public_json_to_remote,
@@ -786,6 +788,34 @@ def render_git_and_import(root: Path) -> None:
         if rc == 0 and (rv_out or rv_err).strip():
             st.caption("当前 remote（请确认指向你的私有库）")
             st.code((rv_out + rv_err).strip(), language="text")
+
+        origin_code, origin_out, origin_err = git_get_remote_url("origin")
+        current_origin = (origin_out or "").strip() if origin_code == 0 else ""
+        st.markdown("#### Git 远程（origin）")
+        st.caption(
+            "建议改成你自己的 fork 或私有仓库；后续看板内 push 默认都会用这个 origin。"
+        )
+        remote_url = st.text_input(
+            "origin 地址",
+            value=current_origin,
+            key="dash_git_origin_url",
+            placeholder="git@github.com:<user>/<repo>.git",
+        )
+        if origin_code != 0 and (origin_err or "").strip():
+            st.caption(
+                "当前还没有配置 origin，保存时会自动执行 `git remote add origin ...`。"
+            )
+        if st.button("保存 origin 远程", key="git_set_origin"):
+            if not remote_url.strip():
+                st.warning("请填写 origin 地址")
+            else:
+                r_code, r_out, r_err = git_set_remote_url("origin", remote_url.strip())
+                st.code(r_out + r_err, language="text")
+                if r_code == 0:
+                    st.success("origin 已更新")
+                    st.rerun()
+                else:
+                    st.error("origin 设置失败，请检查上方日志")
 
         st.markdown("#### Git 身份（user.name / user.email）")
         c_name_local, o_name_local, _ = git_get_config("user.name", global_scope=False)
