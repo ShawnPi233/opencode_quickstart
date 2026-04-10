@@ -14,7 +14,7 @@
 推荐在当前 shell 里执行：
 
 ```bash
-source /user/baibingsong/opencode_quickstart/quick_start.sh
+source /user/<user>/opencode_quickstart/quick_start.sh
 ```
 
 首次运行会提示你选择供应商，并输入 API Key。
@@ -25,7 +25,7 @@ source /user/baibingsong/opencode_quickstart/quick_start.sh
 如果只想执行安装，不立刻加载环境：
 
 ```bash
-cd /user/baibingsong/opencode_quickstart
+cd /user/<user>/opencode_quickstart
 bash start.sh
 ```
 
@@ -75,7 +75,7 @@ source quick_start.sh
 典型流程：
 
 ```bash
-cd /user/baibingsong/opencode_quickstart
+cd /user/<user>/opencode_quickstart
 git add tracked_config/opencode.public.json
 git commit -m "chore: update opencode config"
 git push
@@ -100,7 +100,7 @@ git push
 如果你想用 Streamlit 界面：
 
 ```bash
-cd /user/baibingsong/opencode_quickstart
+cd /user/<user>/opencode_quickstart
 bash start.sh ui
 ```
 
