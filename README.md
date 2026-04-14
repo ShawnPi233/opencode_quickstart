@@ -43,11 +43,48 @@ source "<OPENCODE_ROOT>/env_init.sh"
 source "<OPENCODE_ROOT>/env_init.sh"
 ```
 
+如果是新开的 SSH 会话，也一样要先执行这一步。因为 SSH 会启动一个新的 shell，
+不会自动继承你之前终端里已经 `source` 过的 `PATH`、`XDG_CONFIG_HOME`、
+`XDG_DATA_HOME`、`XDG_STATE_HOME`、`OPENCODE_CONFIG` 等环境变量。
+
 然后就可以直接用：
 
 ```bash
 opencode --help
 ```
+
+继续上一次 OpenCode 会话时，可使用：
+
+```bash
+opencode -c
+```
+
+或先查看本机已有会话：
+
+```bash
+opencode session
+```
+
+## Session 存储位置
+
+在这个 quickstart 环境里，`env_init.sh` 会设置：
+
+```bash
+export XDG_DATA_HOME="$OPENCODE_ROOT/data"
+export XDG_STATE_HOME="$OPENCODE_ROOT/state"
+```
+
+因此 OpenCode 的 session、历史记录和运行时数据默认保存在当前机器的
+`<OPENCODE_ROOT>/data` 与 `<OPENCODE_ROOT>/state` 下，而不是自动从别的机器读取。
+
+这意味着：
+
+- 同一台机器上，新开 SSH 会话后，只要 `source "<OPENCODE_ROOT>/env_init.sh"`，通常就能看到原来的 session
+- 不同机器之间，默认不会自动共享 session
+- 仅同步 `tracked_config/opencode.public.json` / `tracked_config/opencode.secrets.json` 只能共享配置，不能共享 session 历史
+
+如果你想在另一台机器继续使用某台机器上的历史会话，需要额外同步该机器的
+`<OPENCODE_ROOT>/data/opencode` 与相关状态目录，或使用 OpenCode 自带的导出/导入能力。
 
 默认安装目录：
 
